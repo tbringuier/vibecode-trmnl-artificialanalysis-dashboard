@@ -5,13 +5,7 @@
 {%- assign aa_lab_cap = lab_cap | default: tp.lab_cap | default: 2 -%}
 {%- assign aa_value_threshold = value_threshold | default: tp.value_threshold | default: 70 -%}
 {%- assign aa_speed_threshold = speed_threshold | default: tp.speed_threshold | default: 50 -%}
-<script type="application/json" id="aa-data">
-[
-{%- for m in data -%}
-{"name":{{ m.name | json }},"creator":{{ m.model_creator.name | json }},"lab":{{ m.model_creator.slug | json }},"date":{{ m.release_date | json }},"idx":{{ m.evaluations.artificial_analysis_intelligence_index | json }},"in":{{ m.pricing.price_1m_input_tokens | json }},"out":{{ m.pricing.price_1m_output_tokens | json }},"blend":{{ m.pricing.price_1m_blended_3_to_1 | json }},"tps":{{ m.median_output_tokens_per_second | json }},"ttft":{{ m.median_time_to_first_token_seconds | json }}}{%- unless forloop.last -%},{%- endunless -%}
-{%- endfor -%}
-]
-</script>
+<script type="application/json" id="aa-data">{{ data | json }}</script>
 <script>
 (function () {
   var VIEW = {{ aa_view | json }};

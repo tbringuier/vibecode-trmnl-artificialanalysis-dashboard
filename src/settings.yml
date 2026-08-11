@@ -14,7 +14,7 @@ custom_fields:
   - keyname: api_key
     field_type: password
     name: API Key
-    description: Free key from artificialanalysis.ai/insights
+    description: artificialanalysis.ai/data-api → Create a free API key
     placeholder: aa_...
   - keyname: view
     field_type: select
