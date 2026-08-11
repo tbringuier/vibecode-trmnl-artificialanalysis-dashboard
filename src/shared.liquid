@@ -1,0 +1,288 @@
+{%- assign tp = trmnl.plugin_settings.custom_fields_values -%}
+{%- assign aa_view = view | default: tp.view | default: "intelligence" -%}
+{%- assign aa_open_extra = open_extra | default: tp.open_extra | default: "" -%}
+{%- assign aa_lang = language | default: tp.language | default: "en" -%}
+{%- assign aa_lab_cap = lab_cap | default: tp.lab_cap | default: 2 -%}
+{%- assign aa_value_threshold = value_threshold | default: tp.value_threshold | default: 70 -%}
+{%- assign aa_speed_threshold = speed_threshold | default: tp.speed_threshold | default: 50 -%}
+<script type="application/json" id="aa-data">
+[
+{%- for m in data -%}
+{"name":{{ m.name | json }},"creator":{{ m.model_creator.name | json }},"lab":{{ m.model_creator.slug | json }},"date":{{ m.release_date | json }},"idx":{{ m.evaluations.artificial_analysis_intelligence_index | json }},"in":{{ m.pricing.price_1m_input_tokens | json }},"out":{{ m.pricing.price_1m_output_tokens | json }},"blend":{{ m.pricing.price_1m_blended_3_to_1 | json }},"tps":{{ m.median_output_tokens_per_second | json }},"ttft":{{ m.median_time_to_first_token_seconds | json }}}{%- unless forloop.last -%},{%- endunless -%}
+{%- endfor -%}
+]
+</script>
+<script>
+(function () {
+  var VIEW = {{ aa_view | json }};
+  var OPEN_EXTRA = {{ aa_open_extra | json }};
+  var LANG = {{ aa_lang | json }};
+  var LAB_CAP = parseInt({{ aa_lab_cap | json }}, 10);
+  var VALUE_CUT = parseInt({{ aa_value_threshold | json }}, 10);
+  var SPEED_CUT = parseInt({{ aa_speed_threshold | json }}, 10);
+  if (isNaN(LAB_CAP)) LAB_CAP = 2;
+  if (isNaN(VALUE_CUT)) VALUE_CUT = 70;
+  if (isNaN(SPEED_CUT)) SPEED_CUT = 50;
+
+  var STRINGS = {
+    en: {
+      index: 'Index', model: 'Model', lab: 'Lab', released: 'Released', open: 'Open',
+      inout: 'In·Out', params: 'Params', tps: 'Tok/s', ttft: 'TTFT', free: 'Free',
+      nodata: 'No data — check API key',
+      views: { intelligence: 'Intelligence Index', open: 'Open Weights', value: 'Best Value', speed: 'Fastest' }
+    },
+    fr: {
+      index: 'Index', model: 'Modèle', lab: 'Labo', released: 'Sortie', open: 'Open',
+      inout: 'In·Out', params: 'Params', tps: 'Tok/s', ttft: 'TTFT', free: 'Gratuit',
+      nodata: 'Pas de données — vérifier la clé API',
+      views: { intelligence: 'Index Intelligence', open: 'Poids ouverts', value: 'Meilleur prix', speed: 'Plus rapides' }
+    }
+  };
+  var T = STRINGS[LANG] || STRINGS.en;
+
+  // Open-weights facts unavailable in the free API tier; snapshot from
+  // artificialanalysis.ai/models/open-source, key "lab|base name",
+  // value [total params B, active params B].
+  var OPEN_PARAMS = {
+    'kimi|kimi k3': [2800, 104],
+    'zai|glm-5.2': [753, 40],
+    'deepseek|deepseek v4 flash 0731': [284, 13],
+    'minimax|minimax-m3': [428, 23],
+    'xiaomi|mimo-v2.5-pro': [1000, 42],
+    'thinking-machines|inkling': [975, 41],
+    'nvidia|nemotron 3 ultra 550b a55b': [550, 55],
+    'meta|muse glimmer': [30, null],
+    'mistral|mistral medium 3.5': [128, null],
+    'google|gemma 4 31b': [30.7, null],
+    'nvidia|nemotron 3 super 120b a12b': [120.6, 12.7],
+    'openai|gpt-oss-120b': [117, 5.1],
+    'nvidia|nemotron 3.5 lightning': [31.6, 3.6],
+    'cohere|command a+': [218, 25]
+  };
+  var OPEN_LABS = ['nvidia', 'minimax', 'ai2', 'ibm', 'openbmb', 'nous-research',
+    'liquidai', 'inclusionai', 'upstage', 'lg', 'tii-uae', 'swiss-ai-initiative',
+    'prime-intellect', 'deepcogito', 'mbzuai', 'databricks', 'snowflake', 'stepfun'];
+  var OPEN_RULES = [
+    { lab: 'meta', re: /llama/i },
+    { lab: 'google', re: /gemma/i },
+    { lab: 'openai', re: /gpt-oss/i },
+    { lab: 'zai', re: /glm/i },
+    { lab: 'kimi', re: /k2(?!\.)/i },
+    { lab: 'deepseek', re: /\b(r1|v3)/i },
+    { lab: 'alibaba', re: /qwen(?!.*\b(max|plus|turbo|flash)\b)/i },
+    { lab: 'mistral', re: /(small|nemo|devstral|ministral|pixtral|magistral)/i },
+    { lab: 'tencent', re: /hunyuan/i },
+    { lab: 'baidu', re: /ernie/i },
+    { lab: 'bytedance_seed', re: /oss/i }
+  ];
+  var CLOSED_LABS = ['google', 'openai', 'anthropic', 'xai', 'aws', 'azure', 'perplexity'];
+  var SIZE_IN_NAME = /\b(\d+(?:\.\d+)?)\s*B\b/i;
+  var ACTIVE_IN_NAME = /\bA(\d+(?:\.\d+)?)B\b/i;
+  var EFFORT = /\b(max|xhigh|high|medium|low|minimal)\b/i;
+
+  function baseName(name) {
+    var b = name;
+    while (/\s*\([^)]*\)\s*$/.test(b)) b = b.replace(/\s*\([^)]*\)\s*$/, '');
+    return b.trim();
+  }
+
+  function openInfo(m, extras) {
+    var key = m.lab + '|' + m.base.toLowerCase();
+    if (OPEN_PARAMS.hasOwnProperty(key)) return { open: true, params: OPEN_PARAMS[key] };
+    var open = OPEN_LABS.indexOf(m.lab) >= 0 ||
+      OPEN_RULES.some(function (r) { return r.lab === m.lab && r.re.test(m.base); }) ||
+      extras.indexOf(m.base.toLowerCase()) >= 0;
+    if (!open && SIZE_IN_NAME.test(m.base) && CLOSED_LABS.indexOf(m.lab) < 0) open = true;
+    if (!open) return { open: false, params: null };
+    var t = m.base.match(SIZE_IN_NAME);
+    var a = m.base.match(ACTIVE_IN_NAME);
+    return { open: true, params: t ? [parseFloat(t[1]), a ? parseFloat(a[1]) : null] : null };
+  }
+
+  function prepare(raw) {
+    var extras = String(OPEN_EXTRA || '').split(',').map(function (s) { return s.trim().toLowerCase(); })
+      .filter(function (s) { return s.length; });
+    var best = {};
+    raw.forEach(function (m) {
+      if (m.idx == null) return;
+      m.base = baseName(m.name);
+      var tag = m.name.slice(m.base.length).match(EFFORT);
+      m.effort = tag ? tag[1].toLowerCase() : null;
+      var key = m.lab + '|' + m.base.toLowerCase();
+      if (!best[key] || m.idx > best[key].idx) best[key] = m;
+    });
+    var models = Object.keys(best).map(function (k) { return best[k]; });
+    models.forEach(function (m) {
+      var info = openInfo(m, extras);
+      m.open = info.open;
+      m.params = info.params;
+      if (!m.tps) m.tps = null;
+      if (!m.ttft) m.ttft = null;
+      if (m.blend == null && m.in != null && m.out != null) m.blend = (3 * m.in + m.out) / 4;
+    });
+    return models;
+  }
+
+  function fmtPrice(v) {
+    if (v == null) return '—';
+    if (v === 0) return T.free;
+    return '$' + v.toFixed(2).replace(/\.?0+$/, '');
+  }
+  function fmtIdx(v) { return v == null ? '—' : v.toFixed(1); }
+  function fmtDate(iso) {
+    if (!iso) return '—';
+    var p = iso.split('-');
+    return p[2] + '-' + p[1] + '-' + p[0];
+  }
+  function fmtParams(p) {
+    if (!p) return '—';
+    var t = p[0] >= 1000 ? (p[0] / 1000).toFixed(1).replace(/\.0$/, '') + 'T' : String(p[0]) + 'B';
+    return p[1] ? p[1] + 'B / ' + t : t;
+  }
+  function fmtTps(v) { return v == null ? '—' : String(Math.round(v)); }
+  function fmtTtft(v) { return v == null ? '—' : v.toFixed(2) + 's'; }
+
+  var COLS = {
+    idx: { h: T.index, v: function (m) { return fmtIdx(m.idx); } },
+    model: { h: T.model, v: function (m) { return m.base + (m.effort ? ' (' + m.effort + ')' : ''); }, clamp: true },
+    lab: { h: T.lab, v: function (m) { return m.creator; }, clamp: true },
+    date: { h: T.released, v: function (m) { return fmtDate(m.date); } },
+    open: { h: T.open, v: function (m) { return m.open ? '✓' : ''; }, center: true },
+    pinout: { h: T.inout, v: function (m) { return fmtPrice(m.in) + ' / ' + fmtPrice(m.out); }, num: true },
+    params: { h: T.params, v: function (m) { return fmtParams(m.params); } },
+    tps: { h: T.tps, v: function (m) { return fmtTps(m.tps); }, num: true },
+    ttft: { h: T.ttft, v: function (m) { return fmtTtft(m.ttft); }, num: true }
+  };
+
+  function byIdx(a, b) { return b.idx - a.idx; }
+
+  function capPerLab(rows, n) {
+    var count = {};
+    return rows.filter(function (m) {
+      if (m.open) return true;
+      count[m.lab] = (count[m.lab] || 0) + 1;
+      return count[m.lab] <= n;
+    });
+  }
+
+  var VIEWS = {
+    intelligence: {
+      rows: function (ms) { return ms.slice().sort(byIdx); },
+      cols: {
+        wide: ['idx', 'model', 'lab', 'date', 'open', 'pinout'],
+        mid: ['idx', 'model', 'lab', 'open', 'pinout'],
+        narrow: ['idx', 'model', 'open']
+      }
+    },
+    open: {
+      rows: function (ms) { return ms.filter(function (m) { return m.open; }).sort(byIdx); },
+      cols: {
+        wide: ['idx', 'model', 'lab', 'params', 'date', 'pinout'],
+        mid: ['idx', 'model', 'lab', 'params'],
+        narrow: ['idx', 'model', 'params']
+      }
+    },
+    value: {
+      rows: function (ms) {
+        return frontier(ms).filter(function (m) { return m.blend != null; })
+          .sort(function (a, b) { return a.blend - b.blend; });
+      },
+      cols: {
+        wide: ['idx', 'model', 'lab', 'date', 'pinout'],
+        mid: ['idx', 'model', 'lab', 'pinout'],
+        narrow: ['idx', 'model', 'pinout']
+      }
+    },
+    speed: {
+      rows: function (ms) {
+        return capable(ms).filter(function (m) { return m.tps != null; })
+          .sort(function (a, b) { return b.tps - a.tps; });
+      },
+      cols: {
+        wide: ['idx', 'model', 'lab', 'tps', 'ttft', 'pinout'],
+        mid: ['idx', 'model', 'lab', 'tps', 'ttft'],
+        narrow: ['idx', 'model', 'tps']
+      }
+    }
+  };
+
+  function maxIdx(ms) { return Math.max.apply(null, ms.map(function (m) { return m.idx; })); }
+  function frontier(ms) {
+    var cut = maxIdx(ms) * (VALUE_CUT / 100);
+    return ms.filter(function (m) { return m.idx >= cut; });
+  }
+  function capable(ms) {
+    var cut = maxIdx(ms) * (SPEED_CUT / 100);
+    return ms.filter(function (m) { return m.idx >= cut; });
+  }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function buildTable(rows, colKeys, size, limit) {
+    var table = el('table', 'table table--' + size + ' table--indexed');
+    table.setAttribute('data-table-limit', 'true');
+    var thead = el('thead');
+    var htr = el('tr');
+    htr.appendChild(el('th', null, '')).appendChild(el('span', 'title title--small', '#'));
+    colKeys.forEach(function (k) {
+      var c = COLS[k];
+      var th = el('th');
+      if (c.num) th.className = 'text--right';
+      if (c.center) th.className = 'text--center';
+      th.appendChild(el('span', 'title title--small', c.h));
+      htr.appendChild(th);
+    });
+    thead.appendChild(htr);
+    table.appendChild(thead);
+    var tbody = el('tbody');
+    rows.slice(0, limit).forEach(function (m, i) {
+      var tr = el('tr');
+      var meta = el('td').appendChild(el('span', 'meta'));
+      meta.appendChild(el('span', 'index', String(i + 1)));
+      tr.appendChild(meta.parentNode);
+      colKeys.forEach(function (k) {
+        var c = COLS[k];
+        var td = el('td');
+        if (c.num) td.className = 'text--right';
+        if (c.center) td.className = 'text--center';
+        var span = el('span', 'label label--small', c.v(m));
+        if (c.clamp) span.setAttribute('data-clamp', '1');
+        td.appendChild(span);
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    return table;
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    var root = document.getElementById('aa-root');
+    if (!root) return;
+    var cfg = {
+      full: { cols: 'wide', size: 'small', limit: 12 },
+      half_horizontal: { cols: 'mid', size: 'xsmall', limit: 8 },
+      half_vertical: { cols: 'narrow', size: 'xsmall', limit: 14 },
+      quadrant: { cols: 'narrow', size: 'xsmall', limit: 6, heading: true }
+    }[root.getAttribute('data-aa')];
+    var viewKey = VIEWS[VIEW] ? VIEW : 'intelligence';
+    var view = VIEWS[viewKey];
+    var models = prepare(JSON.parse(document.getElementById('aa-data').textContent));
+    if (!models.length) {
+      root.appendChild(el('span', 'label', T.nodata));
+      return;
+    }
+    var rows = LAB_CAP > 0 ? capPerLab(view.rows(models), LAB_CAP) : view.rows(models);
+
+    if (cfg.heading) root.appendChild(el('span', 'title title--small', 'AA · ' + T.views[viewKey]));
+    root.appendChild(buildTable(rows, view.cols[cfg.cols], cfg.size, cfg.limit));
+
+    var instance = document.querySelector('.title_bar .instance');
+    if (instance) instance.textContent = T.views[viewKey];
+  });
+})();
+</script>

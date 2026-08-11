@@ -1,0 +1,58 @@
+---
+name: Artificial Analysis
+description: LLM leaderboards on e-ink
+strategy: polling
+polling_verb: get
+polling_url: https://artificialanalysis.ai/api/v2/data/llms/models
+polling_headers: x-api-key={{ api_key }}
+framework_version: latest
+dark_mode: 'no'
+no_screen_padding: 'no'
+static_data: ''
+refresh_interval: 360
+custom_fields:
+  - keyname: api_key
+    field_type: password
+    name: API Key
+    description: Free key from artificialanalysis.ai/insights
+    placeholder: aa_...
+  - keyname: view
+    field_type: select
+    name: Dashboard
+    description: Board to display on this instance
+    options:
+      - Intelligence leaderboard: intelligence
+      - Open weights: open
+      - Best value: value
+      - Fastest: speed
+    default: intelligence
+  - keyname: language
+    field_type: select
+    name: Language
+    options:
+      - English: en
+      - Français: fr
+    default: en
+  - keyname: lab_cap
+    field_type: number
+    name: Max closed models per lab
+    description: 0 disables the cap
+    default: 2
+    optional: true
+  - keyname: value_threshold
+    field_type: number
+    name: Best value threshold (%)
+    description: Keep models scoring at least this share of the leader index
+    default: 70
+    optional: true
+  - keyname: speed_threshold
+    field_type: number
+    name: Fastest threshold (%)
+    description: Keep models scoring at least this share of the leader index
+    default: 50
+    optional: true
+  - keyname: open_extra
+    field_type: string
+    name: Extra open-weights models
+    description: Comma-separated model names to also treat as open weights
+    optional: true

@@ -1,0 +1,13 @@
+---
+watch:
+  - .trmnlp.yml
+  - src
+
+custom_fields:
+  api_key: '{{ env.AA_API_KEY }}'
+  view: intelligence
+  language: en
+  lab_cap: 2
+  value_threshold: 70
+  speed_threshold: 50
+  open_extra: ''
