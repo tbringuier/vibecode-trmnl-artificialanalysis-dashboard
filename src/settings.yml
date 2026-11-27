@@ -3,7 +3,10 @@ name: Artificial Analysis
 description: LLM leaderboards on e-ink
 strategy: polling
 polling_verb: get
-polling_url: https://artificialanalysis.ai/api/v2/data/llms/models
+polling_url: |-
+  https://artificialanalysis.ai/api/v2/language/models/free?page=1
+  https://artificialanalysis.ai/api/v2/language/models/free?page=2
+  https://artificialanalysis.ai/api/v2/language/models/free?page=3
 polling_headers: x-api-key={{ api_key }}
 framework_version: latest
 dark_mode: 'no'
