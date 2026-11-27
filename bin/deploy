@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Push src/ to every TRMNL private plugin copy (one per dashboard view).
+# A private plugin has a single set of custom field values, so each board
+# (view = intelligence/open/value/speed) lives in its own plugin on TRMNL.
+# Requires `trmnlp login` once beforehand.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+PLUGINS=(
+  "412872|AA - Intelligence"
+  "412876|AA - Open Weights"
+  "412877|AA - Best Value"
+  "412880|AA - Fastest"
+)
+
+# trmnlp push rewrites src/settings.yml with the server copy: keep ours.
+backup="$(mktemp)"
+cp src/settings.yml "$backup"
+trap 'cp "$backup" src/settings.yml; rm -f "$backup"' EXIT
+
+for p in "${PLUGINS[@]}"; do
+  id="${p%%|*}"
+  name="${p#*|}"
+  echo "==> $name ($id)"
+  { sed '/^name:/d; /^id:/d' "$backup"; echo "id: $id"; echo "name: '$name'"; } > src/settings.yml
+  trmnlp push --force
+done
